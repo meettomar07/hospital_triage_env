@@ -7,7 +7,7 @@ from threading import Lock
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 
-from models import HospitalAction, ResetRequest, StepResponse
+from models import ResetRequest, StepRequest, StepResponse
 from server.hospital_environment import HospitalTriageEnvironment, TASKS
 
 app = FastAPI(title="Hospital Triage OpenEnv", version="0.1.0")
@@ -39,7 +39,8 @@ def health() -> dict[str, str]:
 
 
 @app.post("/reset")
-def reset(request: ResetRequest) -> dict[str, object]:
+def reset(request: ResetRequest | None = None) -> dict[str, object]:
+    request = request or ResetRequest()
     if request.task_id not in TASKS:
         raise HTTPException(
             status_code=422,
@@ -55,7 +56,8 @@ def reset(request: ResetRequest) -> dict[str, object]:
 
 
 @app.post("/step")
-def step(action: HospitalAction) -> StepResponse:
+def step(action: StepRequest | None = None) -> StepResponse:
+    action = action or StepRequest()
     with environment_lock:
         environment = session_environments.get(action.session_id)
         if environment is None:

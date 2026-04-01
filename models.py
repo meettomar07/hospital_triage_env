@@ -100,7 +100,19 @@ class HospitalReward(BaseModel):
 
 class ResetRequest(BaseModel):
     task_id: str = "task_1_basic_triage"
-    seed: int = Field(default=7, ge=0, le=2_147_483_647)
+    seed: int = Field(default=42, ge=0, le=2_147_483_647)
+    session_id: str = Field(default="default", min_length=1, max_length=128)
+
+
+class StepRequest(HospitalAction):
+    action_type: Literal[
+        "assign",
+        "mark_emergency",
+        "reorder_queue",
+        "escalate_emergency",
+        "redirect",
+        "wait",
+    ] = "wait"
     session_id: str = Field(default="default", min_length=1, max_length=128)
 
 
