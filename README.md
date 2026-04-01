@@ -1,6 +1,5 @@
 ﻿---
 title: Hospital Triage Openenv
-emoji: "🏥"
 colorFrom: blue
 colorTo: green
 sdk: docker
