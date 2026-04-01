@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+
+.tmp/
+.pip-build-tracker/
+.git/
+.gitdata/
+
+outputs/
+*.log
+server*.log
+
+.pytest_cache/
+dist/
+build/
+*.egg-info/
