@@ -218,7 +218,7 @@ Representative heuristic baseline results with seeded evaluation:
 |---|---|---:|---:|---:|
 | `task_1_basic_triage` | Basic specialist matching and prioritization | 5 | 20.35 | 87.50 |
 | `task_2_queue_optimization` | Throughput and queue efficiency | 6 | 27.05 | 85.83 |
-| `task_3_emergency_handling` | Escalation and urgent-case handling | 7 | 8.70 | 84.17 |
+| `task_3_emergency_handling` | Escalation and urgent-case handling | 6 | 13.85 | 76.67 |
 
 These results come from the included deterministic baseline flow and show stable end-to-end execution across all three tasks.
 
