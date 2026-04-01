@@ -1,4 +1,14 @@
-﻿# Hospital Triage OpenEnv
+﻿---
+title: Hospital Triage Openenv
+emoji: ""🏥""
+colorFrom: blue
+colorTo: green
+sdk: docker
+pinned: false
+license: mit
+short_description: OpenEnv hospital triage RL environment
+---
+# Hospital Triage OpenEnv
 
 ## Overview
 
