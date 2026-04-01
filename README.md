@@ -240,12 +240,11 @@ Checklist:
 OpenEnv manifest:
 
 ```yaml
-spec_version: 1
 name: hospital_triage_env
-type: space
-runtime: fastapi
-app: server.app:app
-port: 7860
+
+entrypoint:
+  module: server.app
+  callable: app
 ```
 
 ## Project Structure
@@ -275,6 +274,11 @@ hospital_triage_env/
 pip install -e .
 uvicorn server.app:app --host 0.0.0.0 --port 7860
 ```
+
+Core dependency note:
+
+- `openenv-core>=0.2.0` is included in `pyproject.toml`
+- `uv.lock` can be regenerated with `uv lock`
 
 Health check:
 

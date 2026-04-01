@@ -95,5 +95,13 @@ def state(session_id: str = Query(default="default", min_length=1, max_length=12
         return payload
 
 
+def main() -> None:
+    uvicorn.run("server.app:app", host="0.0.0.0", port=7860)
+
+
 def run() -> None:
-    uvicorn.run("server.app:app", host="0.0.0.0", port=7860, reload=False)
+    main()
+
+
+if __name__ == "__main__":
+    main()

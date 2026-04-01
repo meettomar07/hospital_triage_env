@@ -14,10 +14,11 @@ dependencies = [
   "requests>=2.32.0",
   "uvicorn>=0.30.0",
   "openai>=1.45.0",
+  "openenv-core>=0.2.0",
 ]
 
 [project.scripts]
-server = "server.app:run"
+server = "server.app:main"
 
 [tool.setuptools]
 py-modules = ["client", "models"]

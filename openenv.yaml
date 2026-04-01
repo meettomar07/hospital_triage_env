@@ -1,6 +1,5 @@
-spec_version: 1
 name: hospital_triage_env
-type: space
-runtime: fastapi
-app: server.app:app
-port: 7860
+
+entrypoint:
+  module: server.app
+  callable: app
