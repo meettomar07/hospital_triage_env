@@ -19,7 +19,7 @@ This project is built with FastAPI and exposed through an OpenEnv-compatible int
 - `POST /step`
 - `GET /state`
 
-It includes three benchmark tasks, dense reward shaping, deterministic seeded resets, and a baseline inference runner that works with OpenAI-compatible APIs or a deterministic heuristic fallback.
+It includes three benchmark tasks, dense reward shaping, deterministic seeded resets, and a baseline inference runner that works with OpenAI-compatible chat completion APIs plus safe fallback handling for invalid or unavailable model responses.
 
 ## Why This Matters
 
@@ -211,15 +211,15 @@ This produces a more stable training signal than sparse terminal reward alone.
 
 ## Sample Results
 
-Representative heuristic baseline results with seeded evaluation:
+Representative seeded evaluation results:
 
 | Task | Description | Steps | Total Reward | Overall Score |
 |---|---|---:|---:|---:|
-| `task_1_basic_triage` | Basic specialist matching and prioritization | 5 | 20.35 | 87.50 |
-| `task_2_queue_optimization` | Throughput and queue efficiency | 6 | 27.05 | 85.83 |
-| `task_3_emergency_handling` | Escalation and urgent-case handling | 6 | 13.85 | 76.67 |
+| `task_1_basic_triage` | Basic specialist matching and prioritization | 5 | 20.35 | 0.875000 |
+| `task_2_queue_optimization` | Throughput and queue efficiency | 6 | 27.05 | 0.858300 |
+| `task_3_emergency_handling` | Escalation and urgent-case handling | 6 | 13.85 | 0.766700 |
 
-These results come from the included deterministic baseline flow and show stable end-to-end execution across all three tasks.
+Scores are emitted as normalized scalars in the open interval `(0,1)`. Detailed task score components are exported separately in the machine-readable summary.
 
 ## OpenEnv Compliance
 
@@ -320,15 +320,15 @@ export API_BASE_URL=https://your-openai-compatible-endpoint.example/v1
 export ENV_BASE_URL=http://127.0.0.1:7860
 export MODEL_NAME=gpt-4.1-mini
 export HF_TOKEN=your_hf_token
-export OPENAI_API_KEY=your_api_key
+export API_KEY=your_api_key
 ```
 
 Inference behavior:
 
-- uses an OpenAI-compatible responses API when `API_BASE_URL` is set
-- falls back to a deterministic heuristic policy when model output is unavailable or invalid
+- uses an OpenAI-compatible chat completions API when `API_BASE_URL` is set
+- falls back to safe `wait` actions when model output is unavailable, invalid, or unparsable
 - writes step traces to `outputs/logs/`
-- writes evaluation summaries to `outputs/evals/summary.json`
+- writes evaluation summaries to `outputs/evals/summary.json` with scalar `score`, scalar `final_score`, and detailed `score_breakdown`
 - emits `[START]`, `[STEP]`, and `[END]` logs for easy inspection
 
 ## Deployment (Hugging Face Spaces)
@@ -350,9 +350,9 @@ The project is designed to be repeatable and judge-friendly.
 
 - seeded resets produce deterministic task initialization
 - fixed benchmark tasks keep evaluation comparable
-- heuristic fallback is deterministic
+- invalid or failed model responses are handled safely without crashing the runner
 - traces are written to disk for auditability
-- summary scores are exported in machine-readable JSON
+- summary scores are exported in machine-readable JSON with task-level scalar scores normalized to `(0,1)`
 - `state()` exposes full internals for debugging and grading
 
 ## Future Improvements
