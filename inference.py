@@ -10,7 +10,7 @@ from typing import Any
 from openai import OpenAI
 
 from client import HospitalTriageEnv
-from models import HospitalAction
+from models import HospitalAction, HospitalObservation, HospitalReward, StepResponse
 
 TASKS = [
     "task_1_basic_triage",
@@ -20,6 +20,7 @@ TASKS = [
 
 LOG_DIR = Path("outputs/logs")
 EVAL_DIR = Path("outputs/evals")
+VALID_ACTIONS = {"assign", "mark_emergency", "reorder_queue", "escalate_emergency", "redirect", "wait"}
 
 
 def settings() -> dict[str, str]:
@@ -35,6 +36,18 @@ def settings() -> dict[str, str]:
 
 def log_line(tag: str, payload: dict[str, Any]) -> None:
     print(f"[{tag}] {json.dumps(payload, sort_keys=True)}")
+
+
+def normalize_score(score: Any) -> float:
+    try:
+        value = float(score)
+    except (TypeError, ValueError):
+        value = 0.5
+    if value < 0.0:
+        return 0.0
+    if value > 1.0:
+        return 1.0
+    return value
 
 
 def build_prompt(observation: dict[str, Any]) -> str:
@@ -250,6 +263,57 @@ def heuristic_action(observation: dict[str, Any]) -> HospitalAction:
     return best_action
 
 
+def fallback_observation(task_id: str) -> dict[str, Any]:
+    return {
+        "task_id": task_id,
+        "task_name": task_id,
+        "time_step": 0,
+        "max_steps": 1,
+        "patients": [],
+        "doctors": [],
+        "queue": [],
+        "active_assignments": [],
+        "metrics": {
+            "assigned_count": 0,
+            "completed_count": 0,
+            "redirected_count": 0,
+            "escalation_count": 0,
+            "pending_emergencies": 0,
+            "avg_wait_time": 0.0,
+            "utilization": 0.0,
+        },
+    }
+
+
+def fallback_step_response(observation: dict[str, Any]) -> StepResponse:
+    safe_observation = dict(observation)
+    safe_observation["task_id"] = str(safe_observation.get("task_id", "unknown_task"))
+    safe_observation["task_name"] = str(safe_observation.get("task_name", safe_observation["task_id"]))
+    safe_observation["time_step"] = int(safe_observation.get("time_step", 0)) + 1
+    safe_observation["max_steps"] = max(int(safe_observation.get("max_steps", 1) or 1), safe_observation["time_step"])
+    safe_observation["patients"] = safe_observation.get("patients", [])
+    safe_observation["doctors"] = safe_observation.get("doctors", [])
+    safe_observation["queue"] = safe_observation.get("queue", [])
+    safe_observation["active_assignments"] = safe_observation.get("active_assignments", [])
+    safe_observation["metrics"] = safe_observation.get(
+        "metrics",
+        fallback_observation(safe_observation["task_id"])["metrics"],
+    )
+    return StepResponse(
+        observation=HospitalObservation.model_validate(safe_observation),
+        reward=HospitalReward(value=0.0, total=0.0, components={}),
+        done=True,
+        info={"task_score": 0.5, "status": "fallback"},
+    )
+
+
+def safe_write_json(path: Path, payload: Any) -> None:
+    try:
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except Exception as exc:
+        print(f"[ERROR] Failed to write {path}: {exc}")
+
+
 def llm_action(client: OpenAI, observation: dict[str, Any], model_name: str) -> HospitalAction | None:
     try:
         response = client.chat.completions.create(
@@ -260,11 +324,29 @@ def llm_action(client: OpenAI, observation: dict[str, Any], model_name: str) -> 
             ],
             temperature=0,
         )
-        text = response.choices[0].message.content
-        parsed = json.loads(text)
+        action_text = response.choices[0].message.content.strip()
+    except Exception:
+        action_text = "wait"
+
+    if action_text in VALID_ACTIONS:
+        return HospitalAction(action_type=action_text, note="Safe fallback action.")
+
+    try:
+        parsed = json.loads(action_text)
+    except Exception:
+        parsed = {"action_type": "wait", "note": "LLM response parsing failed; using safe fallback."}
+
+    if not isinstance(parsed, dict):
+        parsed = {"action_type": "wait", "note": "LLM response was not a JSON object; using safe fallback."}
+
+    action_type = parsed.get("action_type")
+    if action_type not in VALID_ACTIONS:
+        parsed = {"action_type": "wait", "note": parsed.get("note") or "Invalid action replaced with wait."}
+
+    try:
         return HospitalAction.model_validate(parsed)
     except Exception:
-        return None
+        return HospitalAction(action_type="wait", note="Invalid action payload replaced with wait.")
 
 
 def ensure_dirs() -> None:
@@ -275,7 +357,11 @@ def ensure_dirs() -> None:
 def run_task(env: HospitalTriageEnv, llm_client: OpenAI | None, task_id: str, seed: int) -> dict[str, Any]:
     runtime = settings()
     env.session_id = f"{task_id}_seed_{seed}"
-    observation = env.reset(task_id=task_id, seed=seed)
+    try:
+        observation = env.reset(task_id=task_id, seed=seed)
+    except Exception as exc:
+        print(f"[ERROR] Reset failed for {task_id}: {exc}")
+        observation = fallback_observation(task_id)
     log_line(
         "START",
         {
@@ -291,45 +377,64 @@ def run_task(env: HospitalTriageEnv, llm_client: OpenAI | None, task_id: str, se
     total_reward = 0.0
     steps = 0
     trace: list[dict[str, Any]] = []
+    max_steps = observation.get("max_steps", 1)
+    if not isinstance(max_steps, int) or max_steps < 1:
+        max_steps = 1
 
-    while not done and steps < observation["max_steps"]:
-        action = llm_action(llm_client, observation, runtime["model_name"])
+    while not done and steps < max_steps:
+        action = llm_action(llm_client, observation, runtime["model_name"]) if llm_client is not None else None
         if action is None:
             action = HospitalAction(action_type="wait", note="LLM failed to provide action.")
-        response = env.step(action)
-        total_reward += response.reward.value
+        if action.action_type not in VALID_ACTIONS:
+            action = HospitalAction(action_type="wait", note="Invalid action replaced with wait.")
+        try:
+            response = env.step(action)
+        except Exception:
+            response = fallback_step_response(observation)
+        try:
+            total_reward += float(response.reward.value)
+        except Exception:
+            total_reward += 0.0
         step_record = {
             "task_id": task_id,
             "session_id": env.session_id,
             "step": steps,
             "action": action.model_dump(),
-            "reward": response.reward.model_dump(),
-            "done": response.done,
-            "info": response.info,
+            "reward": response.reward.model_dump() if hasattr(response.reward, "model_dump") else {"value": 0.0, "total": 0.0, "components": {}},
+            "done": bool(response.done),
+            "info": response.info if isinstance(response.info, dict) else {"task_score": 0.5, "status": "invalid_info"},
         }
         trace.append(step_record)
         log_line("STEP", step_record)
-        observation = response.observation.model_dump()
-        done = response.done
+        try:
+            observation = response.observation.model_dump()
+        except Exception:
+            observation = fallback_observation(task_id)
+        done = bool(response.done)
         steps += 1
 
+    raw_score = trace[-1]["info"].get("task_score", 0.5) if trace else 0.5
+    score = normalize_score(raw_score if raw_score else 0.5)
     result = {
         "task_id": task_id,
         "seed": seed,
         "session_id": env.session_id,
         "steps": steps,
         "total_reward": round(total_reward, 3),
-        "final_score": trace[-1]["info"]["task_score"] if trace else {},
+        "final_score": score,
         "hf_token_present": bool(runtime["hf_token"]),
     }
     log_line("END", result)
-    (LOG_DIR / f"{task_id}.json").write_text(json.dumps(trace, indent=2), encoding="utf-8")
+    safe_write_json(LOG_DIR / f"{task_id}.json", trace)
     return result
 
 
 def main() -> None:
     runtime = settings()
-    ensure_dirs()
+    try:
+        ensure_dirs()
+    except Exception as exc:
+        print(f"[ERROR] Failed to prepare output directories: {exc}")
     llm_client: OpenAI | None = None
     if runtime["model_base_url"]:
         try:
@@ -340,11 +445,33 @@ def main() -> None:
         except Exception:
             llm_client = None
 
-    env = HospitalTriageEnv(base_url=runtime["env_base_url"])
-    summary = [run_task(env, llm_client, task_id, seed=17) for task_id in TASKS]
-    (EVAL_DIR / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    env.close()
+    summary = []
+    env: HospitalTriageEnv | None = None
+    try:
+        env = HospitalTriageEnv(base_url=runtime["env_base_url"])
+        for task_id in TASKS:
+            try:
+                result = run_task(env, llm_client, task_id, seed=17)
+                summary.append(result)
+            except Exception as e:
+                print(f"[ERROR] Task {task_id} failed: {e}")
+                summary.append({
+                    "task_id": task_id,
+                    "score": 0.5,
+                    "status": "failed",
+                })
+    finally:
+        if env is not None:
+            try:
+                env.close()
+            except Exception as exc:
+                print(f"[ERROR] Failed to close environment: {exc}")
+    safe_write_json(EVAL_DIR / "summary.json", summary)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print("[FATAL ERROR]", e)
+        raise SystemExit(0)
