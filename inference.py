@@ -28,7 +28,7 @@ def settings() -> dict[str, str]:
         "env_base_url": os.getenv("ENV_BASE_URL", "http://127.0.0.1:7860"),
         "model_name": os.getenv("MODEL_NAME", "gpt-4.1-mini"),
         "hf_token": os.getenv("HF_TOKEN", ""),
-        "openai_api_key": os.getenv("OPENAI_API_KEY", "dummy"),
+        "api_key": os.getenv("API_KEY", "dummy"),
         "debug_logs": os.getenv("DEBUG_LOGS", "0"),
     }
 
@@ -252,12 +252,15 @@ def heuristic_action(observation: dict[str, Any]) -> HospitalAction:
 
 def llm_action(client: OpenAI, observation: dict[str, Any], model_name: str) -> HospitalAction | None:
     try:
-        response = client.responses.create(
+        response = client.chat.completions.create(
             model=model_name,
+            messages=[
+                {"role": "system", "content": "You are a hospital triage agent."},
+                {"role": "user", "content": build_prompt(observation)}
+            ],
             temperature=0,
-            input=build_prompt(observation),
         )
-        text = response.output_text
+        text = response.choices[0].message.content
         parsed = json.loads(text)
         return HospitalAction.model_validate(parsed)
     except Exception:
@@ -290,9 +293,9 @@ def run_task(env: HospitalTriageEnv, llm_client: OpenAI | None, task_id: str, se
     trace: list[dict[str, Any]] = []
 
     while not done and steps < observation["max_steps"]:
-        action = llm_action(llm_client, observation, runtime["model_name"]) if llm_client else None
+        action = llm_action(llm_client, observation, runtime["model_name"])
         if action is None:
-            action = heuristic_action(observation)
+            action = HospitalAction(action_type="wait", note="LLM failed to provide action.")
         response = env.step(action)
         total_reward += response.reward.value
         step_record = {
@@ -332,7 +335,7 @@ def main() -> None:
         try:
             llm_client = OpenAI(
                 base_url=runtime["model_base_url"],
-                api_key=runtime["openai_api_key"],
+                api_key=runtime["api_key"],
             )
         except Exception:
             llm_client = None
