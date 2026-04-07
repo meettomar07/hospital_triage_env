@@ -1,3 +1,12 @@
+---
+title: Hospital Triage OpenEnv
+emoji: 🏥
+colorFrom: blue
+colorTo: purple
+sdk: docker
+pinned: false
+---
+
 # Hospital Triage OpenEnv
 
 ## Overview
