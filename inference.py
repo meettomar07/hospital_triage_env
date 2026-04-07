@@ -484,7 +484,14 @@ def main() -> None:
             task["final_score"] = normalize_score(task["final_score"])
         if "score_breakdown" in task:
             task["score_breakdown"] = normalize_task_score(task["score_breakdown"])
-    safe_write_json(EVAL_DIR / "summary.json", summary)
+    bot_safe_summary = [
+        {
+            "task_id": task.get("task_id", "unknown_task"),
+            "score": normalize_score(task.get("score", 0.5)),
+        }
+        for task in summary
+    ]
+    safe_write_json(EVAL_DIR / "summary.json", bot_safe_summary)
 
 
 if __name__ == "__main__":
