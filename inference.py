@@ -429,7 +429,8 @@ def run_task(env: HospitalTriageEnv, llm_client: OpenAI | None, task_id: str, se
         "steps": steps,
         "total_reward": round(total_reward, 3),
         "score": score,
-        "final_score": normalized_task_score,
+        "final_score": score,
+        "score_breakdown": normalized_task_score,
         "hf_token_present": bool(runtime["hf_token"]),
     }
     log_line("END", result)
@@ -467,6 +468,7 @@ def main() -> None:
                     "task_id": task_id,
                     "score": normalize_score(0.5),
                     "final_score": normalize_score(0.5),
+                    "score_breakdown": normalize_score(0.5),
                     "status": "failed",
                 })
     finally:
@@ -479,7 +481,9 @@ def main() -> None:
         if "score" in task:
             task["score"] = normalize_score(task["score"])
         if "final_score" in task:
-            task["final_score"] = normalize_task_score(task["final_score"])
+            task["final_score"] = normalize_score(task["final_score"])
+        if "score_breakdown" in task:
+            task["score_breakdown"] = normalize_task_score(task["score_breakdown"])
     safe_write_json(EVAL_DIR / "summary.json", summary)
 
 
