@@ -219,7 +219,7 @@ Representative seeded evaluation results:
 | `task_2_queue_optimization` | Throughput and queue efficiency | 6 | 27.05 | 0.858300 |
 | `task_3_emergency_handling` | Escalation and urgent-case handling | 6 | 13.85 | 0.766700 |
 
-Scores are emitted as normalized scalars in the open interval `(0,1)`. Detailed task score components are exported separately in the machine-readable summary.
+Scores are emitted as normalized scalars in the open interval `(0,1)`. The final machine-readable summary intentionally keeps only `task_id` and `score` per task for maximum parser compatibility.
 
 ## OpenEnv Compliance
 
@@ -328,7 +328,7 @@ Inference behavior:
 - uses an OpenAI-compatible chat completions API when `API_BASE_URL` is set
 - falls back to safe `wait` actions when model output is unavailable, invalid, or unparsable
 - writes step traces to `outputs/logs/`
-- writes evaluation summaries to `outputs/evals/summary.json` with scalar `score`, scalar `final_score`, and detailed `score_breakdown`
+- writes evaluation summaries to `outputs/evals/summary.json` with only `task_id` and a scalar `score` per task
 - emits `[START]`, `[STEP]`, and `[END]` logs for easy inspection
 
 ## Deployment (Hugging Face Spaces)
