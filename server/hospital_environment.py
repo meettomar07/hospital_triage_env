@@ -737,30 +737,30 @@ class HospitalTriageEnvironment:
             utilization=round(total_load / total_capacity, 3) if total_capacity else 0.0,
         )
 
+    def normalize_score(score: float) -> float:
+        epsilon = 1e-6
+        return max(epsilon, min(1 - epsilon, float(score)))
+
     def _task_score(self) -> dict[str, float]:
         metrics = self._metrics()
-        epsilon = 1e-6
 
-        def clip(value: float) -> float:
-            return max(epsilon, min(1.0 - epsilon, round(value, 6)))
-
-        completion_ratio = clip(len(self.completed_patients) / len(self.patients))
+        completion_ratio = self.normalize_score(len(self.completed_patients) / len(self.patients))
         emergency_cases = [p for p in self.patients.values() if p["true_severity"] >= 8 or p["emergency_flag"]]
         resolved_emergencies = [
             p
             for p in emergency_cases
             if p["status"] == "completed" and p["waiting_time"] <= max(2, self.task.emergency_delay_threshold + 1)
         ]
-        emergency_score = clip(len(resolved_emergencies) / len(emergency_cases) if emergency_cases else 1.0)
-        wait_score = clip(max(0.0, 1.0 - (metrics.avg_wait_time / 6.0)))
-        utilization_score = clip(min(1.0, metrics.utilization + 0.25))
-        safety_score = clip(
+        emergency_score = self.normalize_score(len(resolved_emergencies) / len(emergency_cases) if emergency_cases else 1.0)
+        wait_score = self.normalize_score(max(0.0, 1.0 - (metrics.avg_wait_time / 6.0)))
+        utilization_score = self.normalize_score(min(1.0, metrics.utilization + 0.25))
+        safety_score = self.normalize_score(
             max(
                 0.0,
                 1.0 - ((self.invalid_action_count * 0.08) + (len(self.redirected_patients) * 0.03)),
             )
         )
-        overall = clip(
+        overall = self.normalize_score(
             0.35 * completion_ratio
             + 0.25 * emergency_score
             + 0.2 * wait_score
