@@ -39,15 +39,18 @@ def log_line(tag: str, payload: dict[str, Any]) -> None:
 
 
 def normalize_score(score: Any) -> float:
+    epsilon = 1e-6
     try:
         value = float(score)
     except (TypeError, ValueError):
         value = 0.5
-    if value < 0.0:
-        return 0.0
-    if value > 1.0:
-        return 1.0
-    return value
+    return max(epsilon, min(1 - epsilon, value))
+
+
+def normalize_task_score(task_score: Any) -> Any:
+    if isinstance(task_score, dict):
+        return {key: normalize_score(value) for key, value in task_score.items()}
+    return normalize_score(task_score)
 
 
 def build_prompt(observation: dict[str, Any]) -> str:
@@ -303,7 +306,7 @@ def fallback_step_response(observation: dict[str, Any]) -> StepResponse:
         observation=HospitalObservation.model_validate(safe_observation),
         reward=HospitalReward(value=0.0, total=0.0, components={}),
         done=True,
-        info={"task_score": 0.5, "status": "fallback"},
+        info={"task_score": normalize_score(0.5), "status": "fallback"},
     )
 
 
@@ -402,8 +405,9 @@ def run_task(env: HospitalTriageEnv, llm_client: OpenAI | None, task_id: str, se
             "action": action.model_dump(),
             "reward": response.reward.model_dump() if hasattr(response.reward, "model_dump") else {"value": 0.0, "total": 0.0, "components": {}},
             "done": bool(response.done),
-            "info": response.info if isinstance(response.info, dict) else {"task_score": 0.5, "status": "invalid_info"},
+            "info": response.info if isinstance(response.info, dict) else {"task_score": normalize_score(0.5), "status": "invalid_info"},
         }
+        step_record["info"]["task_score"] = normalize_task_score(step_record["info"].get("task_score", 0.5))
         trace.append(step_record)
         log_line("STEP", step_record)
         try:
@@ -414,14 +418,18 @@ def run_task(env: HospitalTriageEnv, llm_client: OpenAI | None, task_id: str, se
         steps += 1
 
     raw_score = trace[-1]["info"].get("task_score", 0.5) if trace else 0.5
-    score = normalize_score(raw_score if raw_score else 0.5)
+    normalized_task_score = normalize_task_score(raw_score if raw_score else 0.5)
+    score = normalize_score(
+        normalized_task_score.get("overall", 0.5) if isinstance(normalized_task_score, dict) else normalized_task_score
+    )
     result = {
         "task_id": task_id,
         "seed": seed,
         "session_id": env.session_id,
         "steps": steps,
         "total_reward": round(total_reward, 3),
-        "final_score": score,
+        "score": score,
+        "final_score": normalized_task_score,
         "hf_token_present": bool(runtime["hf_token"]),
     }
     log_line("END", result)
@@ -457,7 +465,8 @@ def main() -> None:
                 print(f"[ERROR] Task {task_id} failed: {e}")
                 summary.append({
                     "task_id": task_id,
-                    "score": 0.5,
+                    "score": normalize_score(0.5),
+                    "final_score": normalize_score(0.5),
                     "status": "failed",
                 })
     finally:
@@ -466,6 +475,11 @@ def main() -> None:
                 env.close()
             except Exception as exc:
                 print(f"[ERROR] Failed to close environment: {exc}")
+    for task in summary:
+        if "score" in task:
+            task["score"] = normalize_score(task["score"])
+        if "final_score" in task:
+            task["final_score"] = normalize_task_score(task["final_score"])
     safe_write_json(EVAL_DIR / "summary.json", summary)
 
 

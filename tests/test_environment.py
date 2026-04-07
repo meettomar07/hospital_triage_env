@@ -7,6 +7,7 @@ import unittest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+from inference import normalize_score, normalize_task_score
 from models import HospitalAction
 from server.app import app
 from server.hospital_environment import HospitalTriageEnvironment
@@ -42,6 +43,35 @@ class HospitalEnvironmentTests(unittest.TestCase):
         self.assertEqual(reward.value, reward.total)
         self.assertIn("reward_breakdown", info)
         self.assertEqual(observation.task_id, "task_1_basic_triage")
+
+    def test_task_scores_are_strictly_within_open_interval(self) -> None:
+        env = HospitalTriageEnvironment()
+        env.reset(task_id="task_1_basic_triage", seed=7)
+
+        initial_scores = env._task_score()
+        for value in initial_scores.values():
+            self.assertGreater(value, 0.0)
+            self.assertLess(value, 1.0)
+
+        _, _, _, info = env.step(HospitalAction(action_type="wait"))
+        for value in info["task_score"].values():
+            self.assertGreater(value, 0.0)
+            self.assertLess(value, 1.0)
+
+
+class ScoreNormalizationTests(unittest.TestCase):
+    def test_normalize_score_clamps_to_open_interval(self) -> None:
+        self.assertGreater(normalize_score(0.0), 0.0)
+        self.assertLess(normalize_score(0.0), 1.0)
+        self.assertGreater(normalize_score(1.0), 0.0)
+        self.assertLess(normalize_score(1.0), 1.0)
+
+    def test_normalize_task_score_clamps_every_field(self) -> None:
+        normalized = normalize_task_score({"overall": 0.0, "wait_score": 1.0, "safety_score": "bad"})
+
+        for value in normalized.values():
+            self.assertGreater(value, 0.0)
+            self.assertLess(value, 1.0)
 
 
 class HospitalApiTests(unittest.TestCase):

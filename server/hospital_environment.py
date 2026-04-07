@@ -737,14 +737,24 @@ class HospitalTriageEnvironment:
             utilization=round(total_load / total_capacity, 3) if total_capacity else 0.0,
         )
 
+    @staticmethod
     def normalize_score(score: float) -> float:
         epsilon = 1e-6
-        return max(epsilon, min(1 - epsilon, float(score)))
+        try:
+            score = float(score)
+        except (TypeError, ValueError):
+            score = 0.5
+        return max(epsilon, min(1 - epsilon, score))
+
+    def _normalize_score_map(self, scores: dict[str, Any]) -> dict[str, float]:
+        return {key: self.normalize_score(value) for key, value in scores.items()}
 
     def _task_score(self) -> dict[str, float]:
         metrics = self._metrics()
 
-        completion_ratio = self.normalize_score(len(self.completed_patients) / len(self.patients))
+        completion_ratio = self.normalize_score(
+            len(self.completed_patients) / len(self.patients) if self.patients else 0.5
+        )
         emergency_cases = [p for p in self.patients.values() if p["true_severity"] >= 8 or p["emergency_flag"]]
         resolved_emergencies = [
             p
@@ -767,14 +777,14 @@ class HospitalTriageEnvironment:
             + 0.1 * utilization_score
             + 0.1 * safety_score
         )
-        return {
+        return self._normalize_score_map({
             "overall": overall,
             "completion_ratio": completion_ratio,
             "emergency_score": emergency_score,
             "wait_score": wait_score,
             "utilization_score": utilization_score,
             "safety_score": safety_score,
-        }
+        })
 
     def _queue(self) -> list[str]:
         return [patient["patient_id"] for patient in self._available_patients()]
