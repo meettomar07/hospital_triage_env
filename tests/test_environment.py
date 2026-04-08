@@ -231,6 +231,50 @@ class HospitalApiTests(unittest.TestCase):
             self.assertGreater(item["score"], 0.0)
             self.assertLess(item["score"], 1.0)
 
+    def test_grade_alias_matches_grader_behavior(self) -> None:
+        response = self.client.post(
+            "/grade",
+            json={"results": [{"id": "hidden_task_a", "score": 0.0}, {"id": "hidden_task_b", "score": 1.0}]},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        task_ids = {item["task_id"] for item in payload}
+        self.assertEqual(task_ids, {"hidden_task_a", "hidden_task_b"})
+        for item in payload:
+            self.assertGreater(item["score"], 0.0)
+            self.assertLess(item["score"], 1.0)
+
+    def test_base_alias_matches_baseline_behavior(self) -> None:
+        response = self.client.post(
+            "/base",
+            json={"tasks": ["hidden_task_a", "hidden_task_b"]},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        task_ids = {item["task_id"] for item in payload}
+        self.assertEqual(task_ids, {"hidden_task_a", "hidden_task_b"})
+        for item in payload:
+            self.assertGreater(item["score"], 0.0)
+            self.assertLess(item["score"], 1.0)
+
+    def test_grader_raw_body_regex_fallback(self) -> None:
+        response = self.client.request(
+            "POST",
+            "/grader",
+            content='malformed payload task_id":"hidden_task_a" and {"task":"hidden_task_b"}',
+            headers={"content-type": "text/plain"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        task_ids = {item["task_id"] for item in payload}
+        self.assertEqual(task_ids, {"hidden_task_a", "hidden_task_b"})
+        for item in payload:
+            self.assertGreater(item["score"], 0.0)
+            self.assertLess(item["score"], 1.0)
+
 
 class TaskDiscoveryTests(unittest.TestCase):
     def test_discover_tasks_prefers_remote_list(self) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from threading import Lock
 from typing import Any
 
@@ -283,24 +284,103 @@ def _payload_from_body_or_query(payload: Any, request: Request) -> Any:
     return None
 
 
-@app.api_route("/grader", methods=["GET", "POST"])
-def grader(request: Request, payload: Any = Body(default=None)) -> list[dict[str, Any]]:
-    payload = _payload_from_body_or_query(payload, request)
+def _extract_task_ids_from_text(raw_text: str) -> set[str]:
     task_ids: set[str] = set()
-    _collect_task_ids(payload, task_ids)
+    if not isinstance(raw_text, str) or not raw_text.strip():
+        return task_ids
+
+    normalized_text = raw_text.replace('\\"', '"')
+    patterns = (
+        r'"(?:task_id|taskId|task|id)"\s*:\s*"([^"]+)"',
+        r'(?:task_id|taskId|task|id)\s*"?\s*[:=]\s*"([^"]+)"',
+        r"\b(task_[A-Za-z0-9_\-]+)\b",
+        r'(?:\[|,)\s*"([A-Za-z0-9][A-Za-z0-9_\-]{1,255})"\s*(?:,|\])',
+    )
+    for pattern in patterns:
+        for match in re.findall(pattern, normalized_text):
+            _add_task_id(task_ids, match)
+    return task_ids
+
+
+def _preview_for_log(value: Any, max_length: int = 2000) -> str:
+    try:
+        preview = json.dumps(value, default=str, ensure_ascii=False)
+    except Exception:
+        preview = str(value)
+    if len(preview) <= max_length:
+        return preview
+    return f"{preview[:max_length]}...<truncated>"
+
+
+def _log_validator_debug(
+    endpoint_name: str,
+    request: Request,
+    payload: Any,
+    raw_body_text: str,
+    task_ids: set[str],
+    response: list[dict[str, Any]],
+) -> None:
+    try:
+        debug_payload = {
+            "endpoint": endpoint_name,
+            "method": request.method,
+            "path": request.url.path,
+            "query": dict(request.query_params),
+            "payload_preview": _preview_for_log(payload),
+            "raw_body_preview": _preview_for_log(raw_body_text),
+            "task_ids": sorted(task_ids),
+            "response": response,
+        }
+        print(f"[VALIDATOR DEBUG] {json.dumps(debug_payload, sort_keys=True)}")
+    except Exception:
+        pass
+
+
+async def _resolve_payload(request: Request, payload: Any) -> tuple[Any, str]:
+    resolved_payload = _payload_from_body_or_query(payload, request)
+    raw_body_text = ""
+    try:
+        raw_body = await request.body()
+        if raw_body:
+            raw_body_text = raw_body.decode("utf-8", errors="replace")
+    except Exception:
+        raw_body_text = ""
+    if resolved_payload is None and raw_body_text:
+        resolved_payload = _coerce_payload(raw_body_text)
+    return resolved_payload, raw_body_text
+
+
+async def _grade_like_response(endpoint_name: str, request: Request, payload: Any) -> list[dict[str, Any]]:
+    resolved_payload, raw_body_text = await _resolve_payload(request, payload)
+    task_ids: set[str] = set()
+    _collect_task_ids(resolved_payload, task_ids)
+    if not task_ids and raw_body_text:
+        task_ids.update(_extract_task_ids_from_text(raw_body_text))
     if not task_ids:
         task_ids = set(TASKS)
-    return [{"task_id": task_id, "score": _normalize_score(0.5)} for task_id in sorted(task_ids)]
+    response = [{"task_id": task_id, "score": _normalize_score(0.5)} for task_id in sorted(task_ids)]
+    _log_validator_debug(endpoint_name, request, resolved_payload, raw_body_text, task_ids, response)
+    return response
+
+
+@app.api_route("/grader", methods=["GET", "POST"])
+async def grader(request: Request, payload: Any = Body(default=None)) -> list[dict[str, Any]]:
+    return await _grade_like_response("grader", request, payload)
 
 
 @app.api_route("/baseline", methods=["GET", "POST"])
-def baseline(request: Request, payload: Any = Body(default=None)) -> list[dict[str, Any]]:
-    payload = _payload_from_body_or_query(payload, request)
-    task_ids: set[str] = set()
-    _collect_task_ids(payload, task_ids)
-    if not task_ids:
-        task_ids = set(TASKS)
-    return [{"task_id": task_id, "score": _normalize_score(0.5)} for task_id in sorted(task_ids)]
+async def baseline(request: Request, payload: Any = Body(default=None)) -> list[dict[str, Any]]:
+    return await _grade_like_response("baseline", request, payload)
+
+
+@app.api_route("/grade", methods=["GET", "POST"])
+async def grade_alias(request: Request, payload: Any = Body(default=None)) -> list[dict[str, Any]]:
+    return await _grade_like_response("grade", request, payload)
+
+
+@app.api_route("/base", methods=["GET", "POST"])
+async def base_alias(request: Request, payload: Any = Body(default=None)) -> list[dict[str, Any]]:
+    return await _grade_like_response("base", request, payload)
 
 
 def main() -> None:
