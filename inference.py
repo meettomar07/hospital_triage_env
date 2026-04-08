@@ -357,6 +357,22 @@ def ensure_dirs() -> None:
     EVAL_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def choose_action(
+    llm_client: OpenAI | None,
+    observation: dict[str, Any],
+    model_name: str,
+) -> HospitalAction:
+    action = llm_action(llm_client, observation, model_name) if llm_client is not None else None
+    if action is None:
+        try:
+            action = heuristic_action(observation)
+        except Exception:
+            action = HospitalAction(action_type="wait", note="Fallback heuristic failed.")
+    if action.action_type not in VALID_ACTIONS:
+        return HospitalAction(action_type="wait", note="Invalid action replaced with wait.")
+    return action
+
+
 def run_task(env: HospitalTriageEnv, llm_client: OpenAI | None, task_id: str, seed: int) -> dict[str, Any]:
     runtime = settings()
     env.session_id = f"{task_id}_seed_{seed}"
@@ -385,11 +401,7 @@ def run_task(env: HospitalTriageEnv, llm_client: OpenAI | None, task_id: str, se
         max_steps = 1
 
     while not done and steps < max_steps:
-        action = llm_action(llm_client, observation, runtime["model_name"]) if llm_client is not None else None
-        if action is None:
-            action = HospitalAction(action_type="wait", note="LLM failed to provide action.")
-        if action.action_type not in VALID_ACTIONS:
-            action = HospitalAction(action_type="wait", note="Invalid action replaced with wait.")
+        action = choose_action(llm_client, observation, runtime["model_name"])
         try:
             response = env.step(action)
         except Exception:
