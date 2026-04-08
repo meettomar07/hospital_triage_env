@@ -305,7 +305,11 @@ def fallback_step_response(observation: dict[str, Any]) -> StepResponse:
     )
     return StepResponse(
         observation=HospitalObservation.model_validate(safe_observation),
-        reward=HospitalReward(value=0.0, total=0.0, components={}),
+        reward=HospitalReward(
+            value=normalize_score(0.5),
+            total=normalize_score(0.5),
+            components={},
+        ),
         done=True,
         info={"task_score": normalize_score(0.5), "status": "fallback"},
     )

@@ -316,8 +316,12 @@ class HospitalTriageEnvironment:
 
     def step(self, action: HospitalAction) -> tuple[HospitalObservation, HospitalReward, bool, dict[str, Any]]:
         if self.done:
-            reward = HospitalReward(value=0.0, total=0.0, components={"episode_done": 0.0})
             task_score = self._task_score()
+            reward = HospitalReward(
+                value=self.normalize_score(task_score["overall"]),
+                total=self.normalize_score(task_score["overall"]),
+                components={"episode_done": 0.0},
+            )
             return self._observation(), reward, True, {
                 "message": "Episode already finished.",
                 "action_applied": action.model_dump(),
@@ -330,6 +334,7 @@ class HospitalTriageEnvironment:
                 "metrics": self._metrics().model_dump(),
                 "task_score": task_score["overall"],
                 "score_breakdown": task_score,
+                "raw_reward": {"value": 0.0, "total": 0.0, "components": {"episode_done": 0.0}},
                 "debug": self._debug_snapshot(),
             }
 
@@ -370,13 +375,15 @@ class HospitalTriageEnvironment:
             self._record_event("wait", {"note": action.note})
 
         self._advance_time(components)
-        reward_value = round(sum(components.values()), 3)
+        raw_reward_value = round(sum(components.values()), 3)
+        reward_value = self.normalize_score(raw_reward_value)
         reward = HospitalReward(value=reward_value, total=reward_value, components=components)
         self.done = self._check_done()
         info["metrics"] = self._metrics().model_dump()
         task_score = self._task_score()
         info["task_score"] = task_score["overall"]
         info["score_breakdown"] = task_score
+        info["raw_reward"] = {"value": raw_reward_value, "total": raw_reward_value, "components": components}
         info["reward"] = reward.model_dump()
         info["reward_breakdown"] = reward.components
         info["debug"] = self._debug_snapshot()

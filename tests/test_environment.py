@@ -57,6 +57,10 @@ class HospitalEnvironmentTests(unittest.TestCase):
         self.assertIsInstance(info["task_score"], float)
         self.assertGreater(info["task_score"], 0.0)
         self.assertLess(info["task_score"], 1.0)
+        self.assertGreater(info["reward"]["value"], 0.0)
+        self.assertLess(info["reward"]["value"], 1.0)
+        self.assertGreater(info["reward"]["total"], 0.0)
+        self.assertLess(info["reward"]["total"], 1.0)
         self.assertIn("score_breakdown", info)
         for value in info["score_breakdown"].values():
             self.assertGreater(value, 0.0)
