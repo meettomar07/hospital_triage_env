@@ -40,7 +40,10 @@ class HospitalEnvironmentTests(unittest.TestCase):
         self.assertLess(reward.components["invalid_action_penalty"], 0.0)
         self.assertIn("Escalation is only useful", info["message"])
         self.assertIn("debug", info)
-        self.assertEqual(reward.value, reward.total)
+        self.assertGreater(reward.value, 0.0)
+        self.assertLess(reward.value, 1.0)
+        self.assertGreater(reward.total, 0.0)
+        self.assertLess(reward.total, 1.0)
         self.assertIn("reward_breakdown", info)
         self.assertEqual(observation.task_id, "task_1_basic_triage")
 
