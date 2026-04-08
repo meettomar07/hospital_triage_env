@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +31,7 @@ def settings() -> dict[str, str]:
         "env_base_url": os.getenv("ENV_BASE_URL", "http://127.0.0.1:7860"),
         "model_name": os.getenv("MODEL_NAME", "gpt-4.1-mini"),
         "hf_token": os.getenv("HF_TOKEN", ""),
-        "api_key": os.getenv("API_KEY", "dummy"),
+        "api_key": os.getenv("HF_TOKEN") or os.getenv("API_KEY", "dummy"),
         "debug_logs": os.getenv("DEBUG_LOGS", "0"),
     }
 
@@ -70,9 +71,14 @@ def log_step(step: int, action: str, reward: Any, done: bool, error: Any) -> Non
     )
 
 
-def log_end(success: bool, steps: int, rewards: list[Any]) -> None:
+def log_end(success: bool, steps: int, score: Any, rewards: list[Any]) -> None:
     reward_line = ",".join(_format_reward(reward) for reward in rewards)
-    print(f"[END] success={_format_bool(success)} steps={steps} rewards={reward_line}")
+    safe_score = normalize_score(score)
+    print(f"[END] success={_format_bool(success)} steps={steps} score={safe_score:.2f} rewards={reward_line}")
+
+
+def log_error(message: str) -> None:
+    print(message, file=sys.stderr)
 
 
 def normalize_score(score: Any) -> float:
@@ -356,7 +362,7 @@ def safe_write_json(path: Path, payload: Any) -> None:
     try:
         path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     except Exception as exc:
-        print(f"[ERROR] Failed to write {path}: {exc}")
+        log_error(f"[ERROR] Failed to write {path}: {exc}")
 
 
 def llm_action(client: OpenAI, observation: dict[str, Any], model_name: str) -> HospitalAction | None:
@@ -437,17 +443,19 @@ def run_task(env: HospitalTriageEnv, llm_client: OpenAI | None, task_id: str, se
     model_label = runtime["model_name"] if llm_client is not None else "heuristic-only"
     log_start(task_name=task_id, benchmark=BENCHMARK_NAME, model_name=model_label)
     done = False
+    failed = False
     total_reward = 0.0
     steps = 0
     trace: list[dict[str, Any]] = []
     step_rewards: list[float] = []
-    observation = fallback_observation(task_id)
-    failed = False
+    observation: dict[str, Any] = fallback_observation(task_id)
+    normalized_task_score: Any = normalize_score(0.5)
+    score = normalize_score(0.5)
     try:
         try:
             observation = env.reset(task_id=task_id, seed=seed)
         except Exception as exc:
-            print(f"[ERROR] Reset failed for {task_id}: {exc}")
+            log_error(f"[ERROR] Reset failed for {task_id}: {exc}")
             observation = fallback_observation(task_id)
         max_steps = observation.get("max_steps", 1)
         if not isinstance(max_steps, int) or max_steps < 1:
@@ -491,13 +499,24 @@ def run_task(env: HospitalTriageEnv, llm_client: OpenAI | None, task_id: str, se
             steps += 1
     except Exception as exc:
         failed = True
-        print(f"[ERROR] Task {task_id} failed during execution: {exc}")
+        log_error(f"[ERROR] Task {task_id} failed during execution: {exc}")
+    finally:
+        try:
+            raw_score = trace[-1]["info"].get("task_score", 0.5) if trace else 0.5
+            normalized_task_score = normalize_task_score(raw_score if raw_score else 0.5)
+            score = normalize_score(
+                normalized_task_score.get("overall", 0.5) if isinstance(normalized_task_score, dict) else normalized_task_score
+            )
+        except Exception:
+            normalized_task_score = normalize_score(0.5)
+            score = normalize_score(0.5)
+        end_rewards = step_rewards if step_rewards else [0.0]
+        log_end(success=(done and not failed), steps=steps, score=score, rewards=end_rewards)
+        try:
+            safe_write_json(LOG_DIR / f"{task_id}.json", trace)
+        except Exception:
+            pass
 
-    raw_score = trace[-1]["info"].get("task_score", 0.5) if trace else 0.5
-    normalized_task_score = normalize_task_score(raw_score if raw_score else 0.5)
-    score = normalize_score(
-        normalized_task_score.get("overall", 0.5) if isinstance(normalized_task_score, dict) else normalized_task_score
-    )
     result = {
         "task_id": task_id,
         "seed": seed,
@@ -510,12 +529,6 @@ def run_task(env: HospitalTriageEnv, llm_client: OpenAI | None, task_id: str, se
         "status": "failed" if failed else "ok",
         "hf_token_present": bool(runtime["hf_token"]),
     }
-    end_rewards = step_rewards if step_rewards else [0.0]
-    log_end(success=(done and not failed), steps=steps, rewards=end_rewards)
-    try:
-        safe_write_json(LOG_DIR / f"{task_id}.json", trace)
-    except Exception:
-        pass
     return result
 
 
@@ -524,7 +537,7 @@ def main() -> None:
     try:
         ensure_dirs()
     except Exception as exc:
-        print(f"[ERROR] Failed to prepare output directories: {exc}")
+        log_error(f"[ERROR] Failed to prepare output directories: {exc}")
     llm_client: OpenAI | None = None
     if runtime["model_base_url"]:
         try:
@@ -545,7 +558,7 @@ def main() -> None:
                 result = run_task(env, llm_client, task_id, seed=17)
                 summary.append(result)
             except Exception as e:
-                print(f"[ERROR] Task {task_id} failed: {e}")
+                log_error(f"[ERROR] Task {task_id} failed: {e}")
                 summary.append({
                     "task_id": task_id,
                     "score": normalize_score(0.5),
@@ -558,7 +571,7 @@ def main() -> None:
             try:
                 env.close()
             except Exception as exc:
-                print(f"[ERROR] Failed to close environment: {exc}")
+                log_error(f"[ERROR] Failed to close environment: {exc}")
     for task in summary:
         if "score" in task:
             task["score"] = normalize_score(task["score"])
@@ -580,5 +593,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        print("[FATAL ERROR]", e)
+        log_error(f"[FATAL ERROR] {e}")
         raise SystemExit(0)
