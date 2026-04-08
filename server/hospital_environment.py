@@ -17,12 +17,12 @@ from models import (
     VisiblePatient,
 )
 
-SCORE_EPSILON = 1e-4
+SCORE_EPSILON = 0.01
 
 
 def clamp_score(value: float) -> float:
     """Clamp score to strictly open interval (0, 1) as required by OpenEnv."""
-    return max(SCORE_EPSILON, min(1.0 - SCORE_EPSILON, float(value)))
+    return max(0.01, min(0.99, float(value)))
 
 
 @dataclass(frozen=True)

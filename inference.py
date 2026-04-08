@@ -76,7 +76,7 @@ def log_end(success: bool, steps: int, rewards: list[Any]) -> None:
 
 
 def normalize_score(score: Any) -> float:
-    epsilon = 1e-4
+    epsilon = 0.01
     try:
         value = float(score)
     except (TypeError, ValueError):
