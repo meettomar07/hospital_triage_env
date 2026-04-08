@@ -120,6 +120,26 @@ class HospitalApiTests(unittest.TestCase):
         self.assertEqual(alpha_state.json()["task"]["task_id"], "task_1_basic_triage")
         self.assertEqual(beta_state.json()["task"]["task_id"], "task_2_queue_optimization")
 
+    def test_grader_returns_open_interval_scores(self) -> None:
+        response = self.client.post(
+            "/grader",
+            json={
+                "summary": [
+                    {"task_id": "task_1_basic_triage", "score": 1.0},
+                    {"task_id": "task_2_queue_optimization", "score": 0.0},
+                    {"task_id": "task_3_emergency_handling", "score": "bad"},
+                ]
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        for item in payload["task_scores"]:
+            self.assertGreater(item["score"], 0.0)
+            self.assertLess(item["score"], 1.0)
+        self.assertGreater(payload["overall_score"], 0.0)
+        self.assertLess(payload["overall_score"], 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

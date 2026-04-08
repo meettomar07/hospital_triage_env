@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from threading import Lock
+from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query
 
 from models import ResetRequest, StepRequest, StepResponse
 from server.hospital_environment import HospitalTriageEnvironment, TASKS
@@ -30,6 +31,21 @@ def root() -> dict[str, object]:
         "tasks": list(TASKS.keys()),
         "methods": ["reset", "step", "state"],
         "multi_session": True,
+    }
+
+
+@app.get("/tasks")
+def tasks() -> dict[str, object]:
+    return {
+        "tasks": [
+            {
+                "task_id": task.task_id,
+                "name": task.name,
+                "description": task.description,
+                "max_steps": task.max_steps,
+            }
+            for task in TASKS.values()
+        ]
     }
 
 
@@ -93,6 +109,55 @@ def state(session_id: str = Query(default="default", min_length=1, max_length=12
         payload = environment.state()
         payload["session_id"] = session_id
         return payload
+
+
+def _normalize_score(value: Any) -> float:
+    epsilon = 1e-4
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        parsed = 0.5
+    return max(epsilon, min(1 - epsilon, round(parsed, 4)))
+
+
+def _extract_score(item: dict[str, Any]) -> float:
+    for key in ("score", "final_score", "task_score", "overall"):
+        if key in item:
+            return _normalize_score(item.get(key))
+    return _normalize_score(0.5)
+
+
+@app.post("/grader")
+def grader(payload: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
+    payload = payload or {}
+    entries = payload.get("summary")
+    if not isinstance(entries, list):
+        entries = payload.get("task_scores")
+    if not isinstance(entries, list):
+        entries = []
+
+    score_by_task: dict[str, float] = {task_id: _normalize_score(0.5) for task_id in TASKS}
+    for item in entries:
+        if not isinstance(item, dict):
+            continue
+        task_id = str(item.get("task_id", ""))
+        if task_id in score_by_task:
+            score_by_task[task_id] = _extract_score(item)
+
+    overall = _normalize_score(sum(score_by_task.values()) / max(1, len(score_by_task)))
+    return {
+        "task_scores": [{"task_id": task_id, "score": score} for task_id, score in score_by_task.items()],
+        "overall_score": overall,
+    }
+
+
+@app.post("/baseline")
+def baseline() -> dict[str, Any]:
+    task_scores = [{"task_id": task_id, "score": _normalize_score(0.5)} for task_id in TASKS]
+    return {
+        "task_scores": task_scores,
+        "overall_score": _normalize_score(0.5),
+    }
 
 
 def main() -> None:

@@ -1,5 +1,20 @@
+spec_version: 1
 name: hospital_triage_env
+description: Hospital triage reinforcement environment with strict open-interval scoring.
 
 entrypoint:
   module: server.app
   callable: app
+
+server:
+  host: 0.0.0.0
+  port: 7860
+
+endpoints:
+  health: /health
+  tasks: /tasks
+  reset: /reset
+  step: /step
+  state: /state
+  grader: /grader
+  baseline: /baseline
