@@ -151,9 +151,6 @@ def grader(payload: Any = Body(default=None)) -> list[dict[str, Any]]:
 
     if not score_by_task:
         score_by_task = {task_id: _normalize_score(0.5) for task_id in TASKS}
-    else:
-        for task_id in TASKS:
-            score_by_task.setdefault(task_id, _normalize_score(0.5))
 
     return [{"task_id": task_id, "score": score_by_task[task_id]} for task_id in sorted(score_by_task)]
 
