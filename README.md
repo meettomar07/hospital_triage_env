@@ -323,6 +323,8 @@ export HF_TOKEN=your_hf_token
 export API_KEY=your_api_key
 ```
 
+You can also copy `.env.example` in the repo root and populate values for local runs.
+
 Inference behavior:
 
 - uses an OpenAI-compatible chat completions API when `API_BASE_URL` is set
@@ -330,6 +332,20 @@ Inference behavior:
 - writes step traces to `outputs/logs/`
 - writes evaluation summaries to `outputs/evals/summary.json` with only `task_id` and a scalar `score` per task
 - emits `[START]`, `[STEP]`, and `[END]` logs for easy inspection
+
+## Submission Checklist
+
+Before each submission:
+
+1. Confirm required env vars are set for your inference endpoint and model.
+2. Confirm your Space is live and responds at `POST /reset`.
+3. Run the local submission validator script:
+
+```bash
+bash scripts/validate-submission.sh https://<your-space>.hf.space
+```
+
+4. Run inference once and verify logs include `[START]`, `[STEP]`, and `[END]` lines.
 
 ## Deployment (Hugging Face Spaces)
 
