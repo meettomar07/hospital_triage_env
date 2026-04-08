@@ -54,7 +54,11 @@ class HospitalEnvironmentTests(unittest.TestCase):
             self.assertLess(value, 1.0)
 
         _, _, _, info = env.step(HospitalAction(action_type="wait"))
-        for value in info["task_score"].values():
+        self.assertIsInstance(info["task_score"], float)
+        self.assertGreater(info["task_score"], 0.0)
+        self.assertLess(info["task_score"], 1.0)
+        self.assertIn("score_breakdown", info)
+        for value in info["score_breakdown"].values():
             self.assertGreater(value, 0.0)
             self.assertLess(value, 1.0)
 

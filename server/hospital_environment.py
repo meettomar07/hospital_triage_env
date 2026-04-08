@@ -317,6 +317,7 @@ class HospitalTriageEnvironment:
     def step(self, action: HospitalAction) -> tuple[HospitalObservation, HospitalReward, bool, dict[str, Any]]:
         if self.done:
             reward = HospitalReward(value=0.0, total=0.0, components={"episode_done": 0.0})
+            task_score = self._task_score()
             return self._observation(), reward, True, {
                 "message": "Episode already finished.",
                 "action_applied": action.model_dump(),
@@ -327,7 +328,8 @@ class HospitalTriageEnvironment:
                     "recoverable": False,
                 },
                 "metrics": self._metrics().model_dump(),
-                "task_score": self._task_score(),
+                "task_score": task_score["overall"],
+                "score_breakdown": task_score,
                 "debug": self._debug_snapshot(),
             }
 
@@ -372,7 +374,9 @@ class HospitalTriageEnvironment:
         reward = HospitalReward(value=reward_value, total=reward_value, components=components)
         self.done = self._check_done()
         info["metrics"] = self._metrics().model_dump()
-        info["task_score"] = self._task_score()
+        task_score = self._task_score()
+        info["task_score"] = task_score["overall"]
+        info["score_breakdown"] = task_score
         info["reward"] = reward.model_dump()
         info["reward_breakdown"] = reward.components
         info["debug"] = self._debug_snapshot()
