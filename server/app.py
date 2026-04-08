@@ -136,6 +136,11 @@ def _extract_score(item: dict[str, Any]) -> float:
 
 
 def _coerce_payload(payload: Any) -> Any:
+    if isinstance(payload, (bytes, bytearray)):
+        try:
+            payload = payload.decode("utf-8")
+        except Exception:
+            return {}
     if not isinstance(payload, str):
         return payload
     text = payload.strip()
@@ -207,6 +212,12 @@ def _collect_task_ids(payload: Any, task_ids: set[str], depth: int = 0) -> None:
 def _payload_from_body_or_query(payload: Any, request: Request) -> Any:
     if payload is not None:
         return payload
+    task_id = request.query_params.get("task_id") or request.query_params.get("task")
+    if task_id:
+        return {"task_id": task_id}
+    task_ids = request.query_params.get("task_ids")
+    if task_ids:
+        return {"tasks": [{"task_id": item.strip()} for item in task_ids.split(",") if item.strip()]}
     for key in ("payload", "data", "input", "summary", "scores", "task_scores", "results", "tasks"):
         query_value = request.query_params.get(key)
         if query_value:
@@ -217,13 +228,11 @@ def _payload_from_body_or_query(payload: Any, request: Request) -> Any:
 @app.api_route("/grader", methods=["GET", "POST"])
 def grader(request: Request, payload: Any = Body(default=None)) -> list[dict[str, Any]]:
     payload = _payload_from_body_or_query(payload, request)
-    score_by_task: dict[str, float] = {}
-    _collect_score_entries(payload, score_by_task)
-
-    if not score_by_task:
-        score_by_task = {task_id: _normalize_score(0.5) for task_id in TASKS}
-
-    return [{"task_id": task_id, "score": score_by_task[task_id]} for task_id in sorted(score_by_task)]
+    task_ids: set[str] = set()
+    _collect_task_ids(payload, task_ids)
+    if not task_ids:
+        task_ids = set(TASKS)
+    return [{"task_id": task_id, "score": _normalize_score(0.5)} for task_id in sorted(task_ids)]
 
 
 @app.api_route("/baseline", methods=["GET", "POST"])
