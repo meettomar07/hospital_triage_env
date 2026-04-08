@@ -259,6 +259,20 @@ class HospitalApiTests(unittest.TestCase):
             self.assertGreater(item["score"], 0.0)
             self.assertLess(item["score"], 1.0)
 
+    def test_grader_accepts_put_and_trailing_slash(self) -> None:
+        response = self.client.put(
+            "/grader/",
+            json={"task_scores": {"hidden_task_a": 0.0, "hidden_task_b": 1.0}},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        task_ids = {item["task_id"] for item in payload}
+        self.assertEqual(task_ids, {"hidden_task_a", "hidden_task_b"})
+        for item in payload:
+            self.assertGreater(item["score"], 0.0)
+            self.assertLess(item["score"], 1.0)
+
     def test_grader_raw_body_regex_fallback(self) -> None:
         response = self.client.request(
             "POST",
@@ -271,6 +285,21 @@ class HospitalApiTests(unittest.TestCase):
         payload = response.json()
         task_ids = {item["task_id"] for item in payload}
         self.assertEqual(task_ids, {"hidden_task_a", "hidden_task_b"})
+        for item in payload:
+            self.assertGreater(item["score"], 0.0)
+            self.assertLess(item["score"], 1.0)
+
+    def test_grader_handles_invalid_json_content_type_without_422(self) -> None:
+        response = self.client.request(
+            "POST",
+            "/grader",
+            content='{"summary":[{"task_id":"hidden_task_a","score":0.0},',
+            headers={"content-type": "application/json"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload)
         for item in payload:
             self.assertGreater(item["score"], 0.0)
             self.assertLess(item["score"], 1.0)

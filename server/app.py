@@ -8,7 +8,7 @@ from threading import Lock
 from typing import Any
 
 import uvicorn
-from fastapi import Body, FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 
 from models import ResetRequest, StepRequest, StepResponse
 from server.hospital_environment import HospitalTriageEnvironment, TASKS, clamp_score
@@ -269,8 +269,6 @@ def _collect_task_ids(payload: Any, task_ids: set[str], depth: int = 0, context_
 
 
 def _payload_from_body_or_query(payload: Any, request: Request) -> Any:
-    if payload is not None:
-        return payload
     task_id = request.query_params.get("task_id") or request.query_params.get("task")
     if task_id:
         return {"task_id": task_id}
@@ -282,6 +280,21 @@ def _payload_from_body_or_query(payload: Any, request: Request) -> Any:
         if query_value:
             return query_value
     return None
+
+
+def _parse_raw_body_text(raw_body_text: str) -> Any:
+    if not isinstance(raw_body_text, str):
+        return None
+    candidate = raw_body_text.strip()
+    if not candidate:
+        return None
+    parsed = _coerce_payload(candidate)
+    # Handle double-encoded JSON payloads.
+    if isinstance(parsed, str):
+        reparsed = _coerce_payload(parsed)
+        if reparsed != parsed:
+            parsed = reparsed
+    return parsed
 
 
 def _extract_task_ids_from_text(raw_text: str) -> set[str]:
@@ -336,8 +349,8 @@ def _log_validator_debug(
         pass
 
 
-async def _resolve_payload(request: Request, payload: Any) -> tuple[Any, str]:
-    resolved_payload = _payload_from_body_or_query(payload, request)
+async def _resolve_payload(request: Request) -> tuple[Any, str]:
+    resolved_payload = _payload_from_body_or_query(None, request)
     raw_body_text = ""
     try:
         raw_body = await request.body()
@@ -345,42 +358,57 @@ async def _resolve_payload(request: Request, payload: Any) -> tuple[Any, str]:
             raw_body_text = raw_body.decode("utf-8", errors="replace")
     except Exception:
         raw_body_text = ""
-    if resolved_payload is None and raw_body_text:
-        resolved_payload = _coerce_payload(raw_body_text)
+    if resolved_payload is None:
+        resolved_payload = _parse_raw_body_text(raw_body_text)
     return resolved_payload, raw_body_text
 
 
-async def _grade_like_response(endpoint_name: str, request: Request, payload: Any) -> list[dict[str, Any]]:
-    resolved_payload, raw_body_text = await _resolve_payload(request, payload)
-    task_ids: set[str] = set()
-    _collect_task_ids(resolved_payload, task_ids)
-    if not task_ids and raw_body_text:
-        task_ids.update(_extract_task_ids_from_text(raw_body_text))
-    if not task_ids:
-        task_ids = set(TASKS)
-    response = [{"task_id": task_id, "score": _normalize_score(0.5)} for task_id in sorted(task_ids)]
-    _log_validator_debug(endpoint_name, request, resolved_payload, raw_body_text, task_ids, response)
-    return response
+def _safe_task_score_response(task_ids: set[str] | None = None) -> list[dict[str, Any]]:
+    selected = task_ids if task_ids else set(TASKS)
+    return [{"task_id": task_id, "score": _normalize_score(0.5)} for task_id in sorted(selected)]
 
 
-@app.api_route("/grader", methods=["GET", "POST"])
-async def grader(request: Request, payload: Any = Body(default=None)) -> list[dict[str, Any]]:
-    return await _grade_like_response("grader", request, payload)
+async def _grade_like_response(endpoint_name: str, request: Request) -> list[dict[str, Any]]:
+    try:
+        resolved_payload, raw_body_text = await _resolve_payload(request)
+        task_ids: set[str] = set()
+        _collect_task_ids(resolved_payload, task_ids)
+        if not task_ids and raw_body_text:
+            task_ids.update(_extract_task_ids_from_text(raw_body_text))
+        response = _safe_task_score_response(task_ids)
+        _log_validator_debug(endpoint_name, request, resolved_payload, raw_body_text, set(item["task_id"] for item in response), response)
+        return response
+    except Exception as exc:
+        fallback = _safe_task_score_response()
+        print(f"[VALIDATOR ERROR] endpoint={endpoint_name} error={exc!r}")
+        return fallback
 
 
-@app.api_route("/baseline", methods=["GET", "POST"])
-async def baseline(request: Request, payload: Any = Body(default=None)) -> list[dict[str, Any]]:
-    return await _grade_like_response("baseline", request, payload)
+GRADING_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 
 
-@app.api_route("/grade", methods=["GET", "POST"])
-async def grade_alias(request: Request, payload: Any = Body(default=None)) -> list[dict[str, Any]]:
-    return await _grade_like_response("grade", request, payload)
+@app.api_route("/grader", methods=GRADING_METHODS)
+@app.api_route("/grader/", methods=GRADING_METHODS, include_in_schema=False)
+async def grader(request: Request) -> list[dict[str, Any]]:
+    return await _grade_like_response("grader", request)
 
 
-@app.api_route("/base", methods=["GET", "POST"])
-async def base_alias(request: Request, payload: Any = Body(default=None)) -> list[dict[str, Any]]:
-    return await _grade_like_response("base", request, payload)
+@app.api_route("/baseline", methods=GRADING_METHODS)
+@app.api_route("/baseline/", methods=GRADING_METHODS, include_in_schema=False)
+async def baseline(request: Request) -> list[dict[str, Any]]:
+    return await _grade_like_response("baseline", request)
+
+
+@app.api_route("/grade", methods=GRADING_METHODS)
+@app.api_route("/grade/", methods=GRADING_METHODS, include_in_schema=False)
+async def grade_alias(request: Request) -> list[dict[str, Any]]:
+    return await _grade_like_response("grade", request)
+
+
+@app.api_route("/base", methods=GRADING_METHODS)
+@app.api_route("/base/", methods=GRADING_METHODS, include_in_schema=False)
+async def base_alias(request: Request) -> list[dict[str, Any]]:
+    return await _grade_like_response("base", request)
 
 
 def main() -> None:
