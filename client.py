@@ -37,6 +37,16 @@ class HospitalTriageEnv:
         response = self._request("GET", "/health")
         return response.json()
 
+    def tasks(self) -> dict[str, Any]:
+        try:
+            response = self._request("GET", "/tasks")
+        except requests.HTTPError as exc:
+            if exc.response is not None and exc.response.status_code == 404:
+                response = self._request("GET", "/")
+            else:
+                raise
+        return response.json()
+
     def close(self) -> None:
         self.session.close()
 

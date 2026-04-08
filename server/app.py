@@ -127,26 +127,38 @@ def _extract_score(item: dict[str, Any]) -> float:
     return _normalize_score(0.5)
 
 
-@app.post("/grader")
-def grader(payload: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
-    payload = payload or {}
-    entries = payload.get("summary")
-    if not isinstance(entries, list):
-        entries = payload.get("task_scores")
-    if not isinstance(entries, list):
-        entries = []
+def _extract_entries(payload: Any) -> list[Any]:
+    if isinstance(payload, list):
+        return payload
+    if not isinstance(payload, dict):
+        return []
+    for key in ("summary", "task_scores", "scores", "results", "tasks"):
+        entries = payload.get(key)
+        if isinstance(entries, list):
+            return entries
+    return []
 
-    score_by_task: dict[str, float] = {task_id: _normalize_score(0.5) for task_id in TASKS}
+
+@app.post("/grader")
+def grader(payload: Any = Body(default=None)) -> dict[str, Any]:
+    entries = _extract_entries(payload)
+    score_by_task: dict[str, float] = {}
     for item in entries:
         if not isinstance(item, dict):
             continue
-        task_id = str(item.get("task_id", ""))
-        if task_id in score_by_task:
+        task_id = str(item.get("task_id", "")).strip()
+        if task_id:
             score_by_task[task_id] = _extract_score(item)
+
+    if not score_by_task:
+        score_by_task = {task_id: _normalize_score(0.5) for task_id in TASKS}
+    else:
+        for task_id in TASKS:
+            score_by_task.setdefault(task_id, _normalize_score(0.5))
 
     overall = _normalize_score(sum(score_by_task.values()) / max(1, len(score_by_task)))
     return {
-        "task_scores": [{"task_id": task_id, "score": score} for task_id, score in score_by_task.items()],
+        "task_scores": [{"task_id": task_id, "score": score_by_task[task_id]} for task_id in sorted(score_by_task)],
         "overall_score": overall,
     }
 

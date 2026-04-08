@@ -7,7 +7,7 @@ import unittest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from inference import normalize_score, normalize_task_score
+from inference import discover_tasks, normalize_score, normalize_task_score
 from models import HospitalAction
 from server.app import app
 from server.hospital_environment import HospitalTriageEnvironment
@@ -139,6 +139,33 @@ class HospitalApiTests(unittest.TestCase):
             self.assertLess(item["score"], 1.0)
         self.assertGreater(payload["overall_score"], 0.0)
         self.assertLess(payload["overall_score"], 1.0)
+
+    def test_grader_accepts_unknown_task_ids(self) -> None:
+        response = self.client.post(
+            "/grader",
+            json=[
+                {"task_id": "hidden_task_a", "score": 1.0},
+                {"task_id": "hidden_task_b", "score": 0.0},
+            ],
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        task_ids = {item["task_id"] for item in payload["task_scores"]}
+        self.assertIn("hidden_task_a", task_ids)
+        self.assertIn("hidden_task_b", task_ids)
+        for item in payload["task_scores"]:
+            self.assertGreater(item["score"], 0.0)
+            self.assertLess(item["score"], 1.0)
+
+
+class TaskDiscoveryTests(unittest.TestCase):
+    def test_discover_tasks_prefers_remote_list(self) -> None:
+        class FakeEnv:
+            def tasks(self) -> dict[str, object]:
+                return {"tasks": [{"task_id": "x"}, {"task_id": "y"}]}
+
+        self.assertEqual(discover_tasks(FakeEnv()), ["x", "y"])
 
 
 if __name__ == "__main__":

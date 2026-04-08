@@ -362,6 +362,22 @@ def ensure_dirs() -> None:
     EVAL_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def discover_tasks(env: HospitalTriageEnv) -> list[str]:
+    try:
+        payload = env.tasks()
+    except Exception:
+        return TASKS
+
+    candidates = payload.get("tasks")
+    discovered: list[str] = []
+    if isinstance(candidates, list):
+        for item in candidates:
+            task_id = item.get("task_id") if isinstance(item, dict) else item
+            if isinstance(task_id, str) and task_id:
+                discovered.append(task_id)
+    return discovered or TASKS
+
+
 def choose_action(
     llm_client: OpenAI | None,
     observation: dict[str, Any],
@@ -475,7 +491,8 @@ def main() -> None:
     env: HospitalTriageEnv | None = None
     try:
         env = HospitalTriageEnv(base_url=runtime["env_base_url"])
-        for task_id in TASKS:
+        tasks_to_run = discover_tasks(env)
+        for task_id in tasks_to_run:
             try:
                 result = run_task(env, llm_client, task_id, seed=17)
                 summary.append(result)
