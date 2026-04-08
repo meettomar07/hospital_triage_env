@@ -138,7 +138,7 @@ def _extract_entries(payload: Any) -> list[Any]:
     return []
 
 
-@app.post("/grader")
+@app.api_route("/grader", methods=["GET", "POST"])
 def grader(payload: Any = Body(default=None)) -> list[dict[str, Any]]:
     entries = _extract_entries(payload)
     score_by_task: dict[str, float] = {}
@@ -158,13 +158,9 @@ def grader(payload: Any = Body(default=None)) -> list[dict[str, Any]]:
     return [{"task_id": task_id, "score": score_by_task[task_id]} for task_id in sorted(score_by_task)]
 
 
-@app.post("/baseline")
-def baseline() -> dict[str, Any]:
-    task_scores = [{"task_id": task_id, "score": _normalize_score(0.5)} for task_id in TASKS]
-    return {
-        "task_scores": task_scores,
-        "overall_score": _normalize_score(0.5),
-    }
+@app.api_route("/baseline", methods=["GET", "POST"])
+def baseline() -> list[dict[str, Any]]:
+    return [{"task_id": task_id, "score": _normalize_score(0.5)} for task_id in sorted(TASKS)]
 
 
 def main() -> None:
