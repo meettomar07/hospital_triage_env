@@ -134,11 +134,9 @@ class HospitalApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        for item in payload["task_scores"]:
+        for item in payload:
             self.assertGreater(item["score"], 0.0)
             self.assertLess(item["score"], 1.0)
-        self.assertGreater(payload["overall_score"], 0.0)
-        self.assertLess(payload["overall_score"], 1.0)
 
     def test_grader_accepts_unknown_task_ids(self) -> None:
         response = self.client.post(
@@ -151,10 +149,10 @@ class HospitalApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        task_ids = {item["task_id"] for item in payload["task_scores"]}
+        task_ids = {item["task_id"] for item in payload}
         self.assertIn("hidden_task_a", task_ids)
         self.assertIn("hidden_task_b", task_ids)
-        for item in payload["task_scores"]:
+        for item in payload:
             self.assertGreater(item["score"], 0.0)
             self.assertLess(item["score"], 1.0)
 
