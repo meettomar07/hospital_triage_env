@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from threading import Lock
 from typing import Any
 
 import uvicorn
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query, Request
 
 from models import ResetRequest, StepRequest, StepResponse
 from server.hospital_environment import HospitalTriageEnvironment, TASKS, clamp_score
@@ -120,34 +121,104 @@ def _normalize_score(value: Any) -> float:
 
 
 def _extract_score(item: dict[str, Any]) -> float:
-    for key in ("score", "final_score", "task_score", "overall"):
+    for key in ("score", "final_score", "task_score", "overall", "value"):
         if key in item:
-            return _normalize_score(item.get(key))
+            value = item.get(key)
+            if isinstance(value, dict):
+                for nested_key in ("overall", "score", "final_score", "task_score", "value"):
+                    if nested_key in value:
+                        return _normalize_score(value.get(nested_key))
+                for nested_value in value.values():
+                    return _normalize_score(nested_value)
+                return _normalize_score(0.5)
+            return _normalize_score(value)
     return _normalize_score(0.5)
 
 
-def _extract_entries(payload: Any) -> list[Any]:
-    if isinstance(payload, list):
+def _coerce_payload(payload: Any) -> Any:
+    if not isinstance(payload, str):
         return payload
+    text = payload.strip()
+    if not text:
+        return {}
+    try:
+        return json.loads(text)
+    except Exception:
+        return payload
+
+
+def _extract_task_id(item: dict[str, Any]) -> str:
+    for key in ("task_id", "taskId", "task"):
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _collect_score_entries(payload: Any, score_by_task: dict[str, float], depth: int = 0) -> None:
+    if depth > 10:
+        return
+    payload = _coerce_payload(payload)
+    if isinstance(payload, list):
+        for item in payload:
+            _collect_score_entries(item, score_by_task, depth + 1)
+        return
     if not isinstance(payload, dict):
-        return []
-    for key in ("summary", "task_scores", "scores", "results", "tasks"):
-        entries = payload.get(key)
-        if isinstance(entries, list):
-            return entries
-    return []
+        return
+
+    task_id = _extract_task_id(payload)
+    if task_id:
+        score_by_task[task_id] = _extract_score(payload)
+
+    for key, value in payload.items():
+        if (
+            isinstance(key, str)
+            and key.startswith("task_")
+            and key not in {"task_id", "task_score", "task_name"}
+        ):
+            score_by_task[key] = _extract_score(value) if isinstance(value, dict) else _normalize_score(value)
+        _collect_score_entries(value, score_by_task, depth + 1)
+
+
+def _collect_task_ids(payload: Any, task_ids: set[str], depth: int = 0) -> None:
+    if depth > 10:
+        return
+    payload = _coerce_payload(payload)
+    if isinstance(payload, list):
+        for item in payload:
+            _collect_task_ids(item, task_ids, depth + 1)
+        return
+    if not isinstance(payload, dict):
+        return
+
+    task_id = _extract_task_id(payload)
+    if task_id:
+        task_ids.add(task_id)
+    for key, value in payload.items():
+        if (
+            isinstance(key, str)
+            and key.startswith("task_")
+            and key not in {"task_id", "task_score", "task_name"}
+        ):
+            task_ids.add(key)
+        _collect_task_ids(value, task_ids, depth + 1)
+
+
+def _payload_from_body_or_query(payload: Any, request: Request) -> Any:
+    if payload is not None:
+        return payload
+    for key in ("payload", "data", "input", "summary", "scores", "task_scores", "results", "tasks"):
+        query_value = request.query_params.get(key)
+        if query_value:
+            return query_value
+    return None
 
 
 @app.api_route("/grader", methods=["GET", "POST"])
-def grader(payload: Any = Body(default=None)) -> list[dict[str, Any]]:
-    entries = _extract_entries(payload)
+def grader(request: Request, payload: Any = Body(default=None)) -> list[dict[str, Any]]:
+    payload = _payload_from_body_or_query(payload, request)
     score_by_task: dict[str, float] = {}
-    for item in entries:
-        if not isinstance(item, dict):
-            continue
-        task_id = str(item.get("task_id", "")).strip()
-        if task_id:
-            score_by_task[task_id] = _extract_score(item)
+    _collect_score_entries(payload, score_by_task)
 
     if not score_by_task:
         score_by_task = {task_id: _normalize_score(0.5) for task_id in TASKS}
@@ -156,8 +227,13 @@ def grader(payload: Any = Body(default=None)) -> list[dict[str, Any]]:
 
 
 @app.api_route("/baseline", methods=["GET", "POST"])
-def baseline() -> list[dict[str, Any]]:
-    return [{"task_id": task_id, "score": _normalize_score(0.5)} for task_id in sorted(TASKS)]
+def baseline(request: Request, payload: Any = Body(default=None)) -> list[dict[str, Any]]:
+    payload = _payload_from_body_or_query(payload, request)
+    task_ids: set[str] = set()
+    _collect_task_ids(payload, task_ids)
+    if not task_ids:
+        task_ids = set(TASKS)
+    return [{"task_id": task_id, "score": _normalize_score(0.5)} for task_id in sorted(task_ids)]
 
 
 def main() -> None:

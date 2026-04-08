@@ -156,6 +156,34 @@ class HospitalApiTests(unittest.TestCase):
             self.assertGreater(item["score"], 0.0)
             self.assertLess(item["score"], 1.0)
 
+    def test_grader_accepts_stringified_payload(self) -> None:
+        response = self.client.post(
+            "/grader",
+            json='{"summary":[{"task_id":"hidden_task_a","score":1.0},{"task_id":"hidden_task_b","score":0.0}]}',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        task_ids = {item["task_id"] for item in payload}
+        self.assertEqual(task_ids, {"hidden_task_a", "hidden_task_b"})
+        for item in payload:
+            self.assertGreater(item["score"], 0.0)
+            self.assertLess(item["score"], 1.0)
+
+    def test_baseline_mirrors_payload_task_ids(self) -> None:
+        response = self.client.post(
+            "/baseline",
+            json={"tasks": [{"task_id": "hidden_task_a"}, {"task_id": "hidden_task_b"}]},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        task_ids = {item["task_id"] for item in payload}
+        self.assertEqual(task_ids, {"hidden_task_a", "hidden_task_b"})
+        for item in payload:
+            self.assertGreater(item["score"], 0.0)
+            self.assertLess(item["score"], 1.0)
+
 
 class TaskDiscoveryTests(unittest.TestCase):
     def test_discover_tasks_prefers_remote_list(self) -> None:
