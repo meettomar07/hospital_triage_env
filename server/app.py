@@ -189,8 +189,18 @@ def _collect_task_ids(payload: Any, task_ids: set[str], depth: int = 0) -> None:
     if depth > 10:
         return
     payload = _coerce_payload(payload)
+    if isinstance(payload, str):
+        candidate = payload.strip()
+        if candidate:
+            task_ids.add(candidate)
+        return
     if isinstance(payload, list):
         for item in payload:
+            if isinstance(item, str):
+                candidate = item.strip()
+                if candidate:
+                    task_ids.add(candidate)
+                continue
             _collect_task_ids(item, task_ids, depth + 1)
         return
     if not isinstance(payload, dict):
@@ -199,13 +209,33 @@ def _collect_task_ids(payload: Any, task_ids: set[str], depth: int = 0) -> None:
     task_id = _extract_task_id(payload)
     if task_id:
         task_ids.add(task_id)
+
+    for key in ("tasks", "summary", "results", "scores", "task_scores"):
+        section = payload.get(key)
+        if isinstance(section, dict):
+            for candidate_id, value in section.items():
+                if isinstance(candidate_id, str):
+                    normalized = candidate_id.strip()
+                    if normalized:
+                        task_ids.add(normalized)
+                _collect_task_ids(value, task_ids, depth + 1)
+        elif section is not None:
+            _collect_task_ids(section, task_ids, depth + 1)
+
     for key, value in payload.items():
         if (
             isinstance(key, str)
             and key.startswith("task_")
-            and key not in {"task_id", "task_score", "task_name"}
+            and key not in {"task_id", "task_score", "task_scores", "task_name"}
         ):
             task_ids.add(key)
+        if (
+            isinstance(key, str)
+            and key not in {"task_id", "task_score", "task_name", "score", "final_score", "overall", "value"}
+            and isinstance(value, dict)
+            and any(metric_key in value for metric_key in ("score", "final_score", "task_score", "overall", "value"))
+        ):
+            task_ids.add(key.strip())
         _collect_task_ids(value, task_ids, depth + 1)
 
 
