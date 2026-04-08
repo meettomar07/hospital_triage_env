@@ -18,6 +18,7 @@ TASKS = [
     "task_3_emergency_handling",
 ]
 
+BENCHMARK_NAME = "hospital_triage_env"
 LOG_DIR = Path("outputs/logs")
 EVAL_DIR = Path("outputs/evals")
 VALID_ACTIONS = {"assign", "mark_emergency", "reorder_queue", "escalate_emergency", "redirect", "wait"}
@@ -34,8 +35,44 @@ def settings() -> dict[str, str]:
     }
 
 
-def log_line(tag: str, payload: dict[str, Any]) -> None:
-    print(f"[{tag}] {json.dumps(payload, sort_keys=True)}")
+def _to_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def _format_reward(value: Any) -> str:
+    return f"{_to_float(value, 0.0):.2f}"
+
+
+def _format_bool(value: Any) -> str:
+    return "true" if bool(value) else "false"
+
+
+def _format_error(value: Any) -> str:
+    if value in (None, "", {}):
+        return "null"
+    if isinstance(value, dict):
+        message = value.get("message")
+        return str(message) if message else "error"
+    return str(value)
+
+
+def log_start(task_name: str, benchmark: str, model_name: str) -> None:
+    print(f"[START] task={task_name} env={benchmark} model={model_name}")
+
+
+def log_step(step: int, action: str, reward: Any, done: bool, error: Any) -> None:
+    print(
+        f"[STEP] step={step} action={action} reward={_format_reward(reward)} "
+        f"done={_format_bool(done)} error={_format_error(error)}"
+    )
+
+
+def log_end(success: bool, steps: int, rewards: list[Any]) -> None:
+    reward_line = ",".join(_format_reward(reward) for reward in rewards)
+    print(f"[END] success={_format_bool(success)} steps={steps} rewards={reward_line}")
 
 
 def normalize_score(score: Any) -> float:
@@ -397,58 +434,64 @@ def choose_action(
 def run_task(env: HospitalTriageEnv, llm_client: OpenAI | None, task_id: str, seed: int) -> dict[str, Any]:
     runtime = settings()
     env.session_id = f"{task_id}_seed_{seed}"
-    try:
-        observation = env.reset(task_id=task_id, seed=seed)
-    except Exception as exc:
-        print(f"[ERROR] Reset failed for {task_id}: {exc}")
-        observation = fallback_observation(task_id)
-    log_line(
-        "START",
-        {
-            "task_id": task_id,
-            "seed": seed,
-            "session_id": env.session_id,
-            "env_base_url": runtime["env_base_url"],
-            "model_base_url": runtime["model_base_url"] or "heuristic-only",
-            "model": runtime["model_name"],
-        },
-    )
+    model_label = runtime["model_name"] if llm_client is not None else "heuristic-only"
+    log_start(task_name=task_id, benchmark=BENCHMARK_NAME, model_name=model_label)
     done = False
     total_reward = 0.0
     steps = 0
     trace: list[dict[str, Any]] = []
-    max_steps = observation.get("max_steps", 1)
-    if not isinstance(max_steps, int) or max_steps < 1:
-        max_steps = 1
-
-    while not done and steps < max_steps:
-        action = choose_action(llm_client, observation, runtime["model_name"])
+    step_rewards: list[float] = []
+    observation = fallback_observation(task_id)
+    failed = False
+    try:
         try:
-            response = env.step(action)
-        except Exception:
-            response = fallback_step_response(observation)
-        try:
-            total_reward += float(response.reward.value)
-        except Exception:
-            total_reward += 0.0
-        step_record = {
-            "task_id": task_id,
-            "session_id": env.session_id,
-            "step": steps,
-            "action": action.model_dump(),
-            "reward": response.reward.model_dump() if hasattr(response.reward, "model_dump") else {"value": 0.0, "total": 0.0, "components": {}},
-            "done": bool(response.done),
-            "info": response.info if isinstance(response.info, dict) else {"task_score": normalize_score(0.5), "status": "invalid_info"},
-        }
-        step_record["info"]["task_score"] = normalize_task_score(step_record["info"].get("task_score", 0.5))
-        trace.append(step_record)
-        log_line("STEP", step_record)
-        try:
-            observation = response.observation.model_dump()
-        except Exception:
+            observation = env.reset(task_id=task_id, seed=seed)
+        except Exception as exc:
+            print(f"[ERROR] Reset failed for {task_id}: {exc}")
             observation = fallback_observation(task_id)
-        done = bool(response.done)
-        steps += 1
+        max_steps = observation.get("max_steps", 1)
+        if not isinstance(max_steps, int) or max_steps < 1:
+            max_steps = 1
+
+        while not done and steps < max_steps:
+            action = choose_action(llm_client, observation, runtime["model_name"])
+            try:
+                response = env.step(action)
+            except Exception:
+                response = fallback_step_response(observation)
+            try:
+                total_reward += float(response.reward.value)
+            except Exception:
+                total_reward += 0.0
+            step_reward = _to_float(getattr(response.reward, "value", 0.0), 0.0)
+            step_rewards.append(step_reward)
+            step_record = {
+                "task_id": task_id,
+                "session_id": env.session_id,
+                "step": steps,
+                "action": action.model_dump(),
+                "reward": response.reward.model_dump() if hasattr(response.reward, "model_dump") else {"value": 0.0, "total": 0.0, "components": {}},
+                "done": bool(response.done),
+                "info": response.info if isinstance(response.info, dict) else {"task_score": normalize_score(0.5), "status": "invalid_info"},
+            }
+            step_record["info"]["task_score"] = normalize_task_score(step_record["info"].get("task_score", 0.5))
+            trace.append(step_record)
+            log_step(
+                step=steps + 1,
+                action=action.action_type,
+                reward=step_reward,
+                done=bool(response.done),
+                error=step_record["info"].get("error"),
+            )
+            try:
+                observation = response.observation.model_dump()
+            except Exception:
+                observation = fallback_observation(task_id)
+            done = bool(response.done)
+            steps += 1
+    except Exception as exc:
+        failed = True
+        print(f"[ERROR] Task {task_id} failed during execution: {exc}")
 
     raw_score = trace[-1]["info"].get("task_score", 0.5) if trace else 0.5
     normalized_task_score = normalize_task_score(raw_score if raw_score else 0.5)
@@ -464,10 +507,15 @@ def run_task(env: HospitalTriageEnv, llm_client: OpenAI | None, task_id: str, se
         "score": score,
         "final_score": score,
         "score_breakdown": normalized_task_score,
+        "status": "failed" if failed else "ok",
         "hf_token_present": bool(runtime["hf_token"]),
     }
-    log_line("END", result)
-    safe_write_json(LOG_DIR / f"{task_id}.json", trace)
+    end_rewards = step_rewards if step_rewards else [0.0]
+    log_end(success=(done and not failed), steps=steps, rewards=end_rewards)
+    try:
+        safe_write_json(LOG_DIR / f"{task_id}.json", trace)
+    except Exception:
+        pass
     return result
 
 
