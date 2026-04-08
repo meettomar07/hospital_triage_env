@@ -743,12 +743,13 @@ class HospitalTriageEnvironment:
 
     @staticmethod
     def normalize_score(score: float) -> float:
-        epsilon = 1e-6
+        epsilon = 1e-4
         try:
             score = float(score)
         except (TypeError, ValueError):
             score = 0.5
-        return max(epsilon, min(1 - epsilon, score))
+        score = max(epsilon, min(1 - epsilon, score))
+        return max(epsilon, min(1 - epsilon, round(score, 4)))
 
     def _normalize_score_map(self, scores: dict[str, Any]) -> dict[str, float]:
         return {key: self.normalize_score(value) for key, value in scores.items()}

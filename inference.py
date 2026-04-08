@@ -39,12 +39,13 @@ def log_line(tag: str, payload: dict[str, Any]) -> None:
 
 
 def normalize_score(score: Any) -> float:
-    epsilon = 1e-6
+    epsilon = 1e-4
     try:
         value = float(score)
     except (TypeError, ValueError):
         value = 0.5
-    return max(epsilon, min(1 - epsilon, value))
+    value = max(epsilon, min(1 - epsilon, value))
+    return max(epsilon, min(1 - epsilon, round(value, 4)))
 
 
 def normalize_task_score(task_score: Any) -> Any:
