@@ -17,6 +17,13 @@ from models import (
     VisiblePatient,
 )
 
+SCORE_EPSILON = 1e-4
+
+
+def clamp_score(value: float) -> float:
+    """Clamp score to strictly open interval (0, 1) as required by OpenEnv."""
+    return max(SCORE_EPSILON, min(1.0 - SCORE_EPSILON, float(value)))
+
 
 @dataclass(frozen=True)
 class TaskConfig:
@@ -757,13 +764,11 @@ class HospitalTriageEnvironment:
 
     @staticmethod
     def normalize_score(score: float) -> float:
-        epsilon = 1e-4
         try:
             score = float(score)
         except (TypeError, ValueError):
             score = 0.5
-        score = max(epsilon, min(1 - epsilon, score))
-        return max(epsilon, min(1 - epsilon, round(score, 4)))
+        return clamp_score(score)
 
     def _normalize_score_map(self, scores: dict[str, Any]) -> dict[str, float]:
         return {key: self.normalize_score(value) for key, value in scores.items()}

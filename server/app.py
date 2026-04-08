@@ -9,7 +9,7 @@ import uvicorn
 from fastapi import Body, FastAPI, HTTPException, Query
 
 from models import ResetRequest, StepRequest, StepResponse
-from server.hospital_environment import HospitalTriageEnvironment, TASKS
+from server.hospital_environment import HospitalTriageEnvironment, TASKS, clamp_score
 
 app = FastAPI(title="Hospital Triage OpenEnv", version="0.1.0")
 environment_lock = Lock()
@@ -112,12 +112,11 @@ def state(session_id: str = Query(default="default", min_length=1, max_length=12
 
 
 def _normalize_score(value: Any) -> float:
-    epsilon = 1e-4
     try:
         parsed = float(value)
     except (TypeError, ValueError):
         parsed = 0.5
-    return max(epsilon, min(1 - epsilon, round(parsed, 4)))
+    return clamp_score(parsed)
 
 
 def _extract_score(item: dict[str, Any]) -> float:
