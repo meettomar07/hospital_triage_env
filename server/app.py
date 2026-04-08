@@ -139,7 +139,7 @@ def _extract_entries(payload: Any) -> list[Any]:
 
 
 @app.post("/grader")
-def grader(payload: Any = Body(default=None)) -> dict[str, Any]:
+def grader(payload: Any = Body(default=None)) -> list[dict[str, Any]]:
     entries = _extract_entries(payload)
     score_by_task: dict[str, float] = {}
     for item in entries:
@@ -155,11 +155,7 @@ def grader(payload: Any = Body(default=None)) -> dict[str, Any]:
         for task_id in TASKS:
             score_by_task.setdefault(task_id, _normalize_score(0.5))
 
-    overall = _normalize_score(sum(score_by_task.values()) / max(1, len(score_by_task)))
-    return {
-        "task_scores": [{"task_id": task_id, "score": score_by_task[task_id]} for task_id in sorted(score_by_task)],
-        "overall_score": overall,
-    }
+    return [{"task_id": task_id, "score": score_by_task[task_id]} for task_id in sorted(score_by_task)]
 
 
 @app.post("/baseline")
