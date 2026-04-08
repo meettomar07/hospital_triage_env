@@ -153,7 +153,7 @@ def _coerce_payload(payload: Any) -> Any:
 
 
 def _extract_task_id(item: dict[str, Any]) -> str:
-    for key in ("task_id", "taskId", "task"):
+    for key in ("task_id", "taskId", "task", "id"):
         value = item.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
@@ -185,58 +185,86 @@ def _collect_score_entries(payload: Any, score_by_task: dict[str, float], depth:
         _collect_score_entries(value, score_by_task, depth + 1)
 
 
-def _collect_task_ids(payload: Any, task_ids: set[str], depth: int = 0) -> None:
-    if depth > 10:
+def _add_task_id(task_ids: set[str], value: Any) -> None:
+    if not isinstance(value, str):
+        return
+    candidate = value.strip()
+    if not candidate:
+        return
+    if len(candidate) > 256:
+        return
+    blocked = {
+        "task_id",
+        "task",
+        "taskId",
+        "task_name",
+        "task_score",
+        "task_scores",
+        "score",
+        "scores",
+        "summary",
+        "results",
+        "tasks",
+        "payload",
+        "data",
+        "input",
+    }
+    if candidate in blocked:
+        return
+    task_ids.add(candidate)
+
+
+def _collect_task_ids(payload: Any, task_ids: set[str], depth: int = 0, context_key: str | None = None) -> None:
+    if depth > 12:
         return
     payload = _coerce_payload(payload)
+
+    id_field_keys = {"task_id", "taskId", "task", "id"}
+    id_list_keys = {"tasks", "task_ids", "taskIds", "task_list", "taskList"}
+    score_map_keys = {"summary", "results", "scores", "task_scores"}
+
     if isinstance(payload, str):
-        candidate = payload.strip()
-        if candidate:
-            task_ids.add(candidate)
+        if context_key in id_field_keys:
+            _add_task_id(task_ids, payload)
+            return
+        if context_key in id_list_keys | score_map_keys:
+            for part in payload.split(","):
+                _add_task_id(task_ids, part)
+            return
         return
+
     if isinstance(payload, list):
         for item in payload:
-            if isinstance(item, str):
-                candidate = item.strip()
-                if candidate:
-                    task_ids.add(candidate)
+            if isinstance(item, str) and context_key in id_list_keys | score_map_keys | {None}:
+                _add_task_id(task_ids, item)
                 continue
-            _collect_task_ids(item, task_ids, depth + 1)
+            _collect_task_ids(item, task_ids, depth + 1, context_key=context_key)
         return
+
     if not isinstance(payload, dict):
         return
 
-    task_id = _extract_task_id(payload)
-    if task_id:
-        task_ids.add(task_id)
+    for key in id_field_keys:
+        if key in payload:
+            _collect_task_ids(payload.get(key), task_ids, depth + 1, context_key=key)
 
-    for key in ("tasks", "summary", "results", "scores", "task_scores"):
+    for key in id_list_keys:
+        if key in payload:
+            _collect_task_ids(payload.get(key), task_ids, depth + 1, context_key=key)
+
+    for key in score_map_keys:
         section = payload.get(key)
         if isinstance(section, dict):
             for candidate_id, value in section.items():
-                if isinstance(candidate_id, str):
-                    normalized = candidate_id.strip()
-                    if normalized:
-                        task_ids.add(normalized)
-                _collect_task_ids(value, task_ids, depth + 1)
+                _add_task_id(task_ids, candidate_id)
+                _collect_task_ids(value, task_ids, depth + 1, context_key=key)
         elif section is not None:
-            _collect_task_ids(section, task_ids, depth + 1)
+            _collect_task_ids(section, task_ids, depth + 1, context_key=key)
 
     for key, value in payload.items():
-        if (
-            isinstance(key, str)
-            and key.startswith("task_")
-            and key not in {"task_id", "task_score", "task_scores", "task_name"}
-        ):
-            task_ids.add(key)
-        if (
-            isinstance(key, str)
-            and key not in {"task_id", "task_score", "task_name", "score", "final_score", "overall", "value"}
-            and isinstance(value, dict)
-            and any(metric_key in value for metric_key in ("score", "final_score", "task_score", "overall", "value"))
-        ):
-            task_ids.add(key.strip())
-        _collect_task_ids(value, task_ids, depth + 1)
+        if isinstance(key, str) and key.startswith("task_"):
+            _add_task_id(task_ids, key)
+        _collect_task_ids(value, task_ids, depth + 1, context_key=key)
 
 
 def _payload_from_body_or_query(payload: Any, request: Request) -> Any:

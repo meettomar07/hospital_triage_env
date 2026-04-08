@@ -195,6 +195,28 @@ class HospitalApiTests(unittest.TestCase):
             self.assertGreater(item["score"], 0.0)
             self.assertLess(item["score"], 1.0)
 
+    def test_grader_accepts_id_key_in_results(self) -> None:
+        response = self.client.post(
+            "/grader",
+            json={"results": [{"id": "hidden_task_a", "score": 0.0}, {"id": "hidden_task_b", "score": 1.0}]},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        task_ids = {item["task_id"] for item in payload}
+        self.assertEqual(task_ids, {"hidden_task_a", "hidden_task_b"})
+        for item in payload:
+            self.assertGreater(item["score"], 0.0)
+            self.assertLess(item["score"], 1.0)
+
+    def test_grader_ignores_non_task_strings(self) -> None:
+        response = self.client.post("/grader", json={"note": "this is not a task id"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        task_ids = {item["task_id"] for item in payload}
+        self.assertEqual(task_ids, {"task_1_basic_triage", "task_2_queue_optimization", "task_3_emergency_handling"})
+
     def test_baseline_mirrors_payload_task_ids(self) -> None:
         response = self.client.post(
             "/baseline",
